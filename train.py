@@ -17,8 +17,25 @@ import ltn
 import logging 
 from model import SequenceModel
 from dataset import dataset_creator
+import os
+import sklearn.metrics as metrics
+
+os.environ["TOKENIZERS_PARALLELISM"] = "True"
 device = 'cuda:0' if torch.cuda.is_available() else 'mps'
 
+number_of_labels = {
+    'RTE': 2,
+    'MNLI': 3,
+    'QNLI': 2,
+    'COLA': 2
+    }
+
+task_to_metric = {
+    'RTE':  metrics.accuracy_score,
+    'MNLI': metrics.accuracy_score,
+    'QNLI': metrics.accuracy_score,
+    'COLA': metrics.matthews_corrcoef
+    }
 
 def parse_args():
     parser = argparse.ArgumentParser(description="ArgumentParser for GLUE scripts")
@@ -58,50 +75,50 @@ def main(args):
             "test": args.test,
             "dropout": args.dropout,
         }
-
+    
+    
     train_dataset = dataset_creator(args.task)(tokenizer_path_or_name=args.model_name, root_data_path="./data", split='train', max_length=128)
     val_dataset = dataset_creator(args.task)(tokenizer_path_or_name=args.model_name, root_data_path="./data", split='dev', max_length=128)
 
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=1, drop_last=True)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=1, drop_last=True)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, drop_last=True)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, drop_last=True)
 
-    model = SequenceModel(args.model_name, 2, args.dropout).to(device)
+    logging.info(train_dataset.get_decoded_example(13))
+
+    model = SequenceModel(args.model_name, number_of_labels[args.task.upper()], args.dropout).to(device)
     optimizer = AdamW(model.parameters(), lr=args.lr)
     criterion = CrossEntropyLoss()
 
     for epoch in range(10):
         logging.info(f"Started training at epoch {epoch}")
         model.train()
-        train_loss = 0.0
+        train_loss = 0.
         for i, (input_ids, attention_masks, y) in enumerate(tqdm(train_loader)):
+            optimizer.zero_grad()
             input_ids, attention_masks, y = input_ids.to(device), attention_masks.to(device), y.to(device)
             out = model(input_ids, attention_masks)
             loss = criterion(out, y.squeeze(-1))
             train_loss += loss.item()
             loss.backward()
             optimizer.step()
-            optimizer.zero_grad()
-
-        train_loss = train_loss / len(train_loader)
 
         model.eval()
         with torch.no_grad():
-            val_loss = 0.0
-            mean_accuracy = 0.0
+            val_loss = 0.
+            golds = []
+            preds = []
             for i, (input_ids, attention_masks, y) in enumerate(tqdm(val_loader)):
                 input_ids, attention_masks, y = input_ids.to(device), attention_masks.to(device), y.to(device)
                 out = model(input_ids, attention_masks)
                 loss = criterion(out, y.squeeze(-1))
-                train_loss += loss.item()
-                predictions = np.argmax(out.cpu(), axis=1)
-                acc = accuracy_score(y.cpu(), predictions)
-                mean_accuracy += acc
-
-            mean_accuracy /= len(val_loader)
-            val_loss /= len(val_loader)
-
-            logging.info(" epoch %d | train loss %.4f | Val loss %.3f | Val Acc %.3f"
-                %(epoch, train_loss, val_loss, mean_accuracy))
+                val_loss += loss.item()
+                golds.extend(y.cpu().tolist())
+                y_hat = torch.argmax(out.cpu(), dim=-1)
+                preds.extend(y_hat.tolist())
+            
+            score = task_to_metric[args.task.upper()](golds, preds)
+      
+        logging.info(f"LOSS - train: {(train_loss/len(train_loader)):.3f}, valid: {(val_loss/len(val_loader)):.3f}, METRIC SCORE - val: {score} ")
 
 if __name__ == "__main__":
     args = parse_args()

@@ -2,7 +2,7 @@ import torch.nn as nn
 from transformers import AutoModel
 
 class SequenceModel(nn.Module):
-    def __init__(self, model_name: str = "bert-base-uncased", num_labels=2, dropout: float =0.1):
+    def __init__(self, model_name: str="bert-base-uncased", num_labels=2, dropout: float=0.1):
         super().__init__()
         self.encoder = AutoModel.from_pretrained(model_name, return_dict=True, output_hidden_states=True, output_attentions=True)
         self.dropout = nn.Dropout(dropout)
