@@ -214,11 +214,11 @@ def main(args):
                     if number_of_labels[args.task.upper()] == 3:
                         x_A = ltn.Variable("x_A", data[y == 0]) # class A examples
                         x_B = ltn.Variable("x_B", data[y == 1]) # class B examples
-                        x_C = ltn.Variable("x_B", data[y == 2]) # class C examples
+                        x_C = ltn.Variable("x_C", data[y == 2]) # class C examples
                         satt_agg = SatAgg(
                             Forall(x_A, P(x_A, constants[0])),
                             Forall(x_B, P(x_B, constants[1])),
-                            Forall(x_B, P(x_B, constants[2]))
+                            Forall(x_B, P(x_C, constants[2]))
                         )
 
                     elif number_of_labels[args.task.upper()] == 2:
