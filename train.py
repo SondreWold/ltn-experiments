@@ -19,6 +19,7 @@ from model import SequenceModel
 from dataset import dataset_creator
 import os
 import sklearn.metrics as metrics
+import pprint
 
 os.environ["TOKENIZERS_PARALLELISM"] = "True"
 device = 'cuda:0' if torch.cuda.is_available() else 'mps'
@@ -27,14 +28,19 @@ number_of_labels = {
     'RTE': 2,
     'MNLI': 3,
     'QNLI': 2,
-    'COLA': 2
+    'COLA': 2,
+    'SST': 2,
+    'WNLI': 2
     }
 
 task_to_metric = {
     'RTE':  metrics.accuracy_score,
     'MNLI': metrics.accuracy_score,
     'QNLI': metrics.accuracy_score,
-    'COLA': metrics.matthews_corrcoef
+    'COLA': metrics.matthews_corrcoef,
+    'SST': metrics.accuracy_score,
+    'WNLI': metrics.accuracy_score
+
     }
 
 def parse_args():
@@ -71,11 +77,15 @@ def main(args):
             "batch_size": args.batch_size,
             "seed": args.seed,
             "model": args.model_name,
-            "frozen": args.freeze,
+            "freeze": args.freeze,
             "test": args.test,
             "dropout": args.dropout,
         }
-    
+
+    logging.info("HYPERPARAMETERS: \n")
+    pp = pprint.PrettyPrinter(indent=4)
+    pp.pprint(config)
+    print("\n")
     
     train_dataset = dataset_creator(args.task)(tokenizer_path_or_name=args.model_name, root_data_path="./data", split='train', max_length=128)
     val_dataset = dataset_creator(args.task)(tokenizer_path_or_name=args.model_name, root_data_path="./data", split='dev', max_length=128)
@@ -88,6 +98,10 @@ def main(args):
     model = SequenceModel(args.model_name, number_of_labels[args.task.upper()], args.dropout).to(device)
     optimizer = AdamW(model.parameters(), lr=args.lr)
     criterion = CrossEntropyLoss()
+
+    if args.freeze:
+        for param in model.encoder.parameters():
+            param.requires_grad = False
 
     for epoch in range(10):
         logging.info(f"Started training at epoch {epoch}")
@@ -127,7 +141,6 @@ if __name__ == "__main__":
         datefmt="%m/%d/%Y %H:%M:%S",
         level=logging.INFO,
     )
-
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
