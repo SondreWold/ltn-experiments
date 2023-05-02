@@ -1,5 +1,5 @@
-# Approaching the Super GLUE benchmark with Logic Tensor Networks
-Comparing standard CrossEntropy based training on the GLUE tasks to a LTN based approach using the SatAgg objective. 
+# Approaching the GLUE benchmark with Logic Tensor Networks
+Comparing standard CrossEntropy based training on the [GLUE](https://gluebenchmark.com/) tasks to a LTN based approach using the SatAgg objective. 
 
 ## Why?
 
