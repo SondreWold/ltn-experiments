@@ -124,6 +124,7 @@ class QNLI_Dataset(Dataset):
     def get_decoded_example(self, index) -> str:
         return f'EXAMPLE: {self.tokenizer.decode(self.features["input_ids"][index])}, LABEL: {self.labels[index]} = {self.label_inverter[self.labels[index]]}'
 
+# CoLA is perhaps not a good candidate for LTN?
 class COLA_Dataset(Dataset):
 
     def __init__(self, tokenizer_path_or_name: str = 'bert-base-uncased', root_data_path: str = "./data", split: str = 'train', max_length: int=128):

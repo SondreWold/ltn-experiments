@@ -16,14 +16,17 @@ import numpy as np
 import ltn
 import logging
 from torch.optim import lr_scheduler
-from model import SequenceModel
+from model import SequenceModel, LogitsToPredicate
 from dataset import dataset_creator
 import os
 import sklearn.metrics as metrics
 import pprint
+import ltn
+import math
+from factory import get_constants
 
 os.environ["TOKENIZERS_PARALLELISM"] = "True"
-device = 'cuda:0' if torch.cuda.is_available() else 'mps'
+device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
 number_of_labels = {
     'RTE': 2,
@@ -41,7 +44,6 @@ task_to_metric = {
     'COLA': metrics.matthews_corrcoef,
     'SST': metrics.accuracy_score,
     'WNLI': metrics.accuracy_score
-
     }
 
 def parse_args():
@@ -53,15 +55,19 @@ def parse_args():
     parser.add_argument("--optimizer", type=str, default="adamw", help="The optimizer function to train with")
     parser.add_argument("--scheduler", type=str, default="cosine", help="The scheduler to train with")
     parser.add_argument("--epochs", type=int, default=3, help="The number of epochs.")
+    parser.add_argument("--p_value", type=int, default=2, help="The p value for pMeanAgg")
     parser.add_argument("--debug", action='store_true', help="Trigger debug mode")
+    parser.add_argument("--logic_mode", action='store_true', help="Trigger the use of LTN and SatAgg objective")
     parser.add_argument("--freeze", action='store_true', help="Only fine tune classification head")
     parser.add_argument("--test", action='store_true', help="Trigger test eval")
-    parser.add_argument("--lr", type=float, default=3e-5, help="The learning rate).")
+    parser.add_argument("--lr", type=float, default=5e-5, help="The learning rate).")
     parser.add_argument("--seed", type=int, default=42, help="The rng seed")
     parser.add_argument("--gradient_clip", action='store_true', help="The gradient clip")
     parser.add_argument("--beta", type=float, default=1, help="The adam momentum")
     parser.add_argument("--patience", type=int, default=2, help="The patience value")
     parser.add_argument("--dropout", type=float, default=0.2, help="The dropout value")
+    parser.add_argument("--max_steps", default=31250, type=int, help="Total number of training steps to perform.")
+    parser.add_argument("--warmup_proportion", default=0.01, type=float, help="Proportion of training to perform linear learning rate warmup for. E.g., 0.1 = 10%% of training.")
 
     args = parser.parse_args()
     return args
@@ -100,7 +106,13 @@ def main(args):
 
     logging.info(train_dataset.get_decoded_example(13))
 
-    model = SequenceModel(args.model_name, number_of_labels[args.task.upper()], args.dropout).to(device)
+    model = SequenceModel(device, args.model_name, number_of_labels[args.task.upper()], args.dropout).to(device)
+
+    if args.logic_mode:
+        P = ltn.Predicate(LogitsToPredicate(device, model)).to(device)
+        Forall = ltn.Quantifier(ltn.fuzzy_ops.AggregPMeanError(p=args.p_value), quantifier="f")
+        SatAgg = ltn.fuzzy_ops.SatAgg()
+        constants = get_constants(args.task, device)
 
     params = list(model.named_parameters())
     no_decay = ['bias', 'layer_norm', 'embedding']
@@ -121,6 +133,8 @@ def main(args):
     else:
         pass
 
+    max_steps = len(train_loader) * args.epochs
+
     if args.scheduler == "cosine":
         def cosine_schedule_with_warmup(optimizer, num_warmup_steps: int, num_training_steps: int, min_factor: float):
             def lr_lambda(current_step):
@@ -133,12 +147,12 @@ def main(args):
 
             return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
-        scheduler = cosine_schedule_with_warmup(optimizer, int(args.device_max_steps * args.warmup_proportion), args.device_max_steps, 0.1)
+        scheduler = cosine_schedule_with_warmup(optimizer, int(max_steps * args.warmup_proportion), max_steps, 0.1)
 
     elif args.scheduler == "linear":
         scheduler = lr_scheduler.ChainedScheduler([
-            lr_scheduler.LinearLR(optimizer, start_factor=1e-9, end_factor=1.0, total_iters=int(args.device_max_steps * args.warmup_proportion)),
-            lr_scheduler.LinearLR(optimizer, start_factor=1.0, end_factor=1e-9, total_iters=args.device_max_steps)
+            lr_scheduler.LinearLR(optimizer, start_factor=1e-9, end_factor=1.0, total_iters=int(max_steps * args.warmup_proportion)),
+            lr_scheduler.LinearLR(optimizer, start_factor=1.0, end_factor=1e-9, total_iters=max_steps)
         ])
 
     criterion = CrossEntropyLoss()
@@ -151,25 +165,74 @@ def main(args):
         logging.info(f"Started training at epoch {epoch}")
         model.train()
         train_loss = 0.
+        mean_sat = 0.
         for i, (input_ids, attention_masks, y) in enumerate(tqdm(train_loader)):
             optimizer.zero_grad()
             input_ids, attention_masks, y = input_ids.to(device), attention_masks.to(device), y.to(device)
-            out = model(input_ids, attention_masks)
-            loss = criterion(out, y.squeeze(-1))
+            y = y.squeeze(-1)
+            data = torch.cat((input_ids, attention_masks), -1).to(device)
+            if args.logic_mode:
+                if number_of_labels[args.task.upper()] == 3:
+                    x_A = ltn.Variable("x_A", data[y == 0]) # class A examples
+                    x_B = ltn.Variable("x_B", data[y == 1]) # class B examples
+                    x_C = ltn.Variable("x_B", data[y == 2]) # class C examples
+                    satt_agg = SatAgg(
+                        Forall(x_A, P(x_A, constants[0])),
+                        Forall(x_B, P(x_B, constants[1])),
+                        Forall(x_B, P(x_B, constants[2]))
+                    )
+                elif number_of_labels[args.task.upper()] == 2:
+                    x_A = ltn.Variable("x_A", data[y == 0]) # class A examples
+                    x_B = ltn.Variable("x_B", data[y == 1]) # class B examples
+                    satt_agg = SatAgg(
+                        Forall(x_A, P(x_A, constants[0])),
+                        Forall(x_B, P(x_B, constants[1])),
+                    )
+                mean_sat += satt_agg
+                loss = 1. - satt_agg
+                train_loss += loss.item()
+            else:
+                out = model(data)
+                loss = criterion(out, y)
             train_loss += loss.item()
             loss.backward()
             optimizer.step()
             scheduler.step()
+            break
 
         model.eval()
         with torch.no_grad():
             val_loss = 0.
+            mean_sat = 0.
             golds = []
             preds = []
             for i, (input_ids, attention_masks, y) in enumerate(tqdm(val_loader)):
                 input_ids, attention_masks, y = input_ids.to(device), attention_masks.to(device), y.to(device)
-                out = model(input_ids, attention_masks)
-                loss = criterion(out, y.squeeze(-1))
+                y = y.squeeze(-1)
+                data = torch.cat((input_ids, attention_masks), -1).to(device)
+                if args.logic_mode:
+                    if number_of_labels[args.task.upper()] == 3:
+                        x_A = ltn.Variable("x_A", data[y == 0]) # class A examples
+                        x_B = ltn.Variable("x_B", data[y == 1]) # class B examples
+                        x_C = ltn.Variable("x_B", data[y == 2]) # class C examples
+                        satt_agg = SatAgg(
+                            Forall(x_A, P(x_A, constants[0])),
+                            Forall(x_B, P(x_B, constants[1])),
+                            Forall(x_B, P(x_B, constants[2]))
+                        )
+
+                    elif number_of_labels[args.task.upper()] == 2:
+                        x_A = ltn.Variable("x_A", data[y == 0]) # class A examples
+                        x_B = ltn.Variable("x_B", data[y == 1]) # class B examples
+                        satt_agg = SatAgg(
+                            Forall(x_A, P(x_A, constants[0])),
+                            Forall(x_B, P(x_B, constants[1])),
+                        )
+                    mean_sat += satt_agg
+                    loss = 1. - satt_agg
+                out = model(data)
+                if not args.logic_mode:
+                    loss = criterion(out, y)
                 val_loss += loss.item()
                 golds.extend(y.cpu().tolist())
                 y_hat = torch.argmax(out.cpu(), dim=-1)
@@ -177,7 +240,10 @@ def main(args):
             
             score = task_to_metric[args.task.upper()](golds, preds)
       
-        logging.info(f"LOSS - train: {(train_loss/len(train_loader)):.3f}, valid: {(val_loss/len(val_loader)):.3f}, METRIC SCORE - val: {score} ")
+        if args.logic_mode:
+            logging.info(f"LOSS - train: {(train_loss/len(train_loader)):.3f}, valid: {(val_loss/len(val_loader)):.3f}, SAT - val: {mean_sat / len(val_loader):.3f}, SCORE - val: {score:.3f} ")
+        else:
+            logging.info(f"LOSS - train: {(train_loss/len(train_loader)):.3f}, valid: {(val_loss/len(val_loader)):.3f}, METRIC SCORE - val: {score:.3f} ")
 
 if __name__ == "__main__":
     args = parse_args()
