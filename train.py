@@ -5,7 +5,7 @@ import torch
 from datasets import load_dataset
 from transformers import AutoTokenizer, AutoModel, AutoModelForMultipleChoice
 from transformers import TrainingArguments, Trainer
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, SubsetRandomSampler
 from torch.optim import AdamW
 from torch.nn import CrossEntropyLoss
 from tqdm import tqdm
@@ -67,7 +67,7 @@ def parse_args():
     parser.add_argument("--beta", type=float, default=1, help="The adam momentum")
     parser.add_argument("--patience", type=int, default=2, help="The patience value")
     parser.add_argument("--dropout", type=float, default=0.2, help="The dropout value")
-    parser.add_argument("--sample", type=float, default=0.2, help="The percentage of the original dataset to use for training")
+    parser.add_argument("--sample", type=float, default=1.0, help="The percentage of the original dataset to use for training")
     parser.add_argument("--max_steps", default=31250, type=int, help="Total number of training steps to perform.")
     parser.add_argument("--warmup_proportion", default=0.01, type=float, help="Proportion of training to perform linear learning rate warmup for. E.g., 0.1 = 10%% of training.")
 
@@ -108,7 +108,12 @@ def main(args):
     train_dataset = dataset_creator(args.task)(tokenizer_path_or_name=args.model_name, root_data_path="./data", split='train', max_length=128)
     val_dataset = dataset_creator(args.task)(tokenizer_path_or_name=args.model_name, root_data_path="./data", split='dev', max_length=128)
 
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, drop_last=True)
+    if args.sample < 1.:
+        logging.info(f"Using downsampled train data, with rate {args.sample}")
+    train_length = len(train_dataset)
+    indices = torch.randperm(len(train_dataset))[:int(len(train_dataset)*args.sample)]
+    
+    train_loader = DataLoader(train_dataset, sampler=SubsetRandomSampler(indices), batch_size=args.batch_size, num_workers=4, drop_last=True)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, drop_last=True)
 
     logging.info(train_dataset.get_decoded_example(13))
