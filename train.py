@@ -22,11 +22,12 @@ import os
 import sklearn.metrics as metrics
 import pprint
 import ltn
+import wandb
 import math
 from factory import get_constants
 
 os.environ["TOKENIZERS_PARALLELISM"] = "True"
-device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+device = 'cuda:0' if torch.cuda.is_available() else 'mps'
 
 number_of_labels = {
     'RTE': 2,
@@ -91,7 +92,11 @@ def main(args):
             "freeze": args.freeze,
             "test": args.test,
             "dropout": args.dropout,
+            "logic_mode": args.logic_mode,
+            "p_value": args.p_value
         }
+    
+    wandb.init(project="ltn", config=config, entity="sondrewo")
 
     logging.info("HYPERPARAMETERS: \n")
     pp = pprint.PrettyPrinter(indent=4)
@@ -161,10 +166,11 @@ def main(args):
         for param in model.encoder.parameters():
             param.requires_grad = False
 
-    for epoch in range(10):
+    for epoch in range(args.epochs):
         logging.info(f"Started training at epoch {epoch}")
         model.train()
         train_loss = 0.
+        running_losses = []
         mean_sat = 0.
         for i, (input_ids, attention_masks, y) in enumerate(tqdm(train_loader)):
             optimizer.zero_grad()
@@ -194,7 +200,10 @@ def main(args):
             else:
                 out = model(data)
                 loss = criterion(out, y)
-            train_loss += loss.item()
+            c = loss.item()
+            train_loss += c
+            running_losses.append(c)
+            wandb.log({"running_loss": np.mean(running_losses)})
             loss.backward()
             optimizer.step()
             scheduler.step()
@@ -237,13 +246,21 @@ def main(args):
                 golds.extend(y.cpu().tolist())
                 y_hat = torch.argmax(out.cpu(), dim=-1)
                 preds.extend(y_hat.tolist())
+                break
             
             score = task_to_metric[args.task.upper()](golds, preds)
+        
+        t_l = train_loss / len(train_loader)
+        v_l = val_loss / len(val_loader)
       
+        if not args.debug:
+            wandb.log({"train_loss_epoch": t_l})
+            wandb.log({"val_loss_epoch": v_l})
+
         if args.logic_mode:
-            logging.info(f"LOSS - train: {(train_loss/len(train_loader)):.3f}, valid: {(val_loss/len(val_loader)):.3f}, SAT - val: {mean_sat / len(val_loader):.3f}, SCORE - val: {score:.3f} ")
+            logging.info(f"LOSS - train: {(t_l):.3f}, valid: {(v_l):.3f}, SAT - val: {mean_sat / len(val_loader):.3f}, SCORE - val: {score:.3f} ")
         else:
-            logging.info(f"LOSS - train: {(train_loss/len(train_loader)):.3f}, valid: {(val_loss/len(val_loader)):.3f}, METRIC SCORE - val: {score:.3f} ")
+            logging.info(f"LOSS - train: {(t_l):.3f}, valid: {(v_l):.3f}, METRIC SCORE - val: {score:.3f} ")
 
 if __name__ == "__main__":
     args = parse_args()
