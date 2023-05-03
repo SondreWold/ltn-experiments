@@ -67,6 +67,7 @@ def parse_args():
     parser.add_argument("--beta", type=float, default=1, help="The adam momentum")
     parser.add_argument("--patience", type=int, default=2, help="The patience value")
     parser.add_argument("--dropout", type=float, default=0.2, help="The dropout value")
+    parser.add_argument("--sample", type=float, default=0.2, help="The percentage of the original dataset to use for training")
     parser.add_argument("--max_steps", default=31250, type=int, help="Total number of training steps to perform.")
     parser.add_argument("--warmup_proportion", default=0.01, type=float, help="Proportion of training to perform linear learning rate warmup for. E.g., 0.1 = 10%% of training.")
 
@@ -96,7 +97,8 @@ def main(args):
             "p_value": args.p_value
         }
     
-    wandb.init(project="ltn", config=config, entity="sondrewo")
+    if not args.debug:
+        wandb.init(project="ltn", config=config, entity="sondrewo")
 
     logging.info("HYPERPARAMETERS: \n")
     pp = pprint.PrettyPrinter(indent=4)
@@ -203,11 +205,13 @@ def main(args):
             c = loss.item()
             train_loss += c
             running_losses.append(c)
-            wandb.log({"running_loss": np.mean(running_losses)})
             loss.backward()
             optimizer.step()
             scheduler.step()
-            break
+            if args.debug:
+                break
+            else:
+                wandb.log({"running_loss": np.mean(running_losses)})
 
         model.eval()
         with torch.no_grad():
@@ -256,6 +260,8 @@ def main(args):
         if not args.debug:
             wandb.log({"train_loss_epoch": t_l})
             wandb.log({"val_loss_epoch": v_l})
+            if args.logic_mode:
+                wandb.log({"sat_level_epoch": mean_sat / len(val_loader)})
 
         if args.logic_mode:
             logging.info(f"LOSS - train: {(t_l):.3f}, valid: {(v_l):.3f}, SAT - val: {mean_sat / len(val_loader):.3f}, SCORE - val: {score:.3f} ")
