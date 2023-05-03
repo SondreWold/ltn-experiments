@@ -2,16 +2,12 @@ import argparse
 import random
 import torch.nn as nn
 import torch
-from datasets import load_dataset
 from transformers import AutoTokenizer, AutoModel, AutoModelForMultipleChoice
-from transformers import TrainingArguments, Trainer
 from torch.utils.data import DataLoader, Dataset, SubsetRandomSampler
 from torch.optim import AdamW
 from torch.nn import CrossEntropyLoss
 from tqdm import tqdm
-import pandas as pd
 from sklearn.metrics import accuracy_score
-from datasets import Dataset as Ds
 import numpy as np
 import ltn
 import logging
