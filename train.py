@@ -109,8 +109,8 @@ def main(args):
     train_length = len(train_dataset)
     indices = torch.randperm(len(train_dataset))[:int(len(train_dataset)*args.sample)]
     
-    train_loader = DataLoader(train_dataset, sampler=SubsetRandomSampler(indices), batch_size=args.batch_size, num_workers=4, drop_last=True)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, drop_last=True)
+    train_loader = DataLoader(train_dataset, sampler=SubsetRandomSampler(indices), batch_size=args.batch_size, num_workers=1, drop_last=True)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=1, drop_last=True)
 
     logging.info(train_dataset.get_decoded_example(13))
 
