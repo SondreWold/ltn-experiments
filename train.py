@@ -23,7 +23,7 @@ import math
 from factory import get_constants
 
 os.environ["TOKENIZERS_PARALLELISM"] = "True"
-device = 'cuda:0' if torch.cuda.is_available() else 'mps'
+device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
 number_of_labels = {
     'RTE': 2,
