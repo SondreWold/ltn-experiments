@@ -45,7 +45,7 @@ task_to_metric = {
 
 def parse_args():
     parser = argparse.ArgumentParser(description="ArgumentParser for GLUE scripts")
-    parser.add_argument("--batch_size", type=int, default=16, help="The batch size to use during training.")
+    parser.add_argument("--batch_size", type=int, default=32, help="The batch size to use during training.")
     parser.add_argument("--weight_decay", type=float, default=0.01, help="The weight decay to use during training.") 
     parser.add_argument("--model_name", type=str, default="bert-base-uncased", help="The pretrained model to use")
     parser.add_argument("--task", type=str, default="rte", help="The task to train on")
@@ -102,8 +102,8 @@ def main(args):
     pp.pprint(config)
     print("\n")
     
-    train_dataset = dataset_creator(args.task)(tokenizer_path_or_name=args.model_name, root_data_path="./data", split='train', max_length=128)
-    val_dataset = dataset_creator(args.task)(tokenizer_path_or_name=args.model_name, root_data_path="./data", split='dev', max_length=128)
+    train_dataset = dataset_creator(args.task)(tokenizer_path_or_name=args.model_name, root_data_path="./data", split='train', max_length=64)
+    val_dataset = dataset_creator(args.task)(tokenizer_path_or_name=args.model_name, root_data_path="./data", split='dev', max_length=64)
 
     if args.sample < 1.:
         logging.info(f"Using downsampled train data, with rate {args.sample}")
