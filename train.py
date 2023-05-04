@@ -252,7 +252,6 @@ def main(args):
                 golds.extend(y.cpu().tolist())
                 y_hat = torch.argmax(out.cpu(), dim=-1)
                 preds.extend(y_hat.tolist())
-                break
             
             score = task_to_metric[args.task.upper()](golds, preds)
         
