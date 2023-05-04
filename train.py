@@ -90,7 +90,8 @@ def main(args):
             "test": args.test,
             "dropout": args.dropout,
             "logic_mode": args.logic_mode,
-            "p_value": args.p_value
+            "p_value": args.p_value,
+            "sample": args.sample
         }
     
     if not args.debug:
