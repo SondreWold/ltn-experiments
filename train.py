@@ -261,6 +261,8 @@ def main(args):
         if not args.debug:
             wandb.log({"train_loss_epoch": t_l})
             wandb.log({"val_loss_epoch": v_l})
+            wandb.log({"score": score})
+
             if args.logic_mode:
                 wandb.log({"sat_level_epoch": mean_sat / len(val_loader)})
 
